@@ -169,102 +169,62 @@ def predict_sales():
 # ---------------------------------------------------------
 @superkart_api.route('/v1/predictbatch', methods=['POST'])
 def predict_sales_batch():
-    """
-    Handles batch sales prediction.
-
-    Expected JSON:
-
-    {
-        "data": [
-            {
-                "Product_Weight": ...,
-                "Product_Sugar_Content": "...",
-                "Product_Allocated_Area": ...,
-                "Product_MRP": ...,
-                "Store_Size": "...",
-                "Store_Location_City_Type": "...",
-                "Store_Type": "...",
-                "Store_Age_Years": ...,
-                "Product_Type_Category": "...",
-                "Product_Id_char": "..."
-            },
-            {
-                "Product_Weight": ...,
-                "Product_Sugar_Content": "...",
-                "Product_Allocated_Area": ...,
-                "Product_MRP": ...,
-                "Store_Size": "...",
-                "Store_Location_City_Type": "...",
-                "Store_Type": "...",
-                "Store_Age_Years": ...,
-                "Product_Type_Category": "...",
-                "Product_Id_char": "..."
-            }
-        ]
-    }
-    """
-
     try:
-        request_data = request.get_json()
-
-        if not request_data:
+        # Check if file was uploaded
+        if 'file' not in request.files:
             return jsonify({
-                'error': 'Request body cannot be empty'
+                'error': 'CSV file is required'
             }), 400
 
-        # Expect a list under the "data" key
-        batch_data = request_data.get('data')
+        file = request.files['file']
 
-        if not isinstance(batch_data, list):
+        if file.filename == '':
             return jsonify({
-                'error': 'The "data" field must contain a list of records'
+                'error': 'No file selected'
             }), 400
 
-        if len(batch_data) == 0:
+        # Read uploaded CSV
+        batch_data = pd.read_csv(file)
+
+        logger.info(f"Batch data shape: {batch_data.shape}")
+        logger.info(f"Batch columns: {batch_data.columns.tolist()}")
+
+        # Expected model features
+        FEATURES = [
+            'Product_Weight',
+            'Product_Sugar_Content',
+            'Product_Allocated_Area',
+            'Product_MRP',
+            'Store_Size',
+            'Store_Location_City_Type',
+            'Store_Type',
+            'Store_Age_Years',
+            'Product_Type_Category',
+            'Product_Id_char'
+        ]
+
+        # Check columns
+        missing_columns = [
+            col for col in FEATURES
+            if col not in batch_data.columns
+        ]
+
+        if missing_columns:
             return jsonify({
-                'error': 'The batch cannot be empty'
+                'error': 'Missing columns',
+                'missing_columns': missing_columns
             }), 400
 
-        # Validate every record
-        for index, record in enumerate(batch_data):
+        # Arrange columns in model's expected order
+        input_data = batch_data[FEATURES]
 
-            if not isinstance(record, dict):
-                return jsonify({
-                    'error': f'Record at index {index} must be a JSON object'
-                }), 400
-
-            missing_fields = [
-                field for field in FEATURES
-                if field not in record
-            ]
-
-            if missing_fields:
-                return jsonify({
-                    'error': f'Missing required fields in record {index}',
-                    'fields': missing_fields
-                }), 400
-
-        # Create DataFrame from all records
-        input_data = pd.DataFrame(
-            [
-                [record[field] for field in FEATURES]
-                for record in batch_data
-            ],
-            columns=FEATURES
-        )
-
-        logger.info(
-            f"Batch inference requested for {len(input_data)} records"
-        )
-
-        # Make predictions for the entire batch
+        # Batch prediction
         predictions = model.predict(input_data).tolist()
 
-        # Return predictions
         return jsonify({
             'predictions': predictions,
             'count': len(predictions)
-        })
+        }), 200
 
     except Exception as e:
         logger.exception("Batch prediction failed")
